@@ -28,3 +28,7 @@ docker logs homelab
 
 # Stop it
 docker stop homelab
+
+cd ~/homelab
+docker compose down
+docker compose up -d --build

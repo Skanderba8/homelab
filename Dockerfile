@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install fastapi uvicorn
+RUN pip install fastapi uvicorn psycopg2-binary
 
 COPY main.py .
 

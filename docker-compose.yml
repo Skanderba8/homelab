@@ -1,0 +1,37 @@
+services:
+  backend:
+    build: .
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://skander:llstylish@db:5432/calcdb
+
+  frontend:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - backend
+
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: skander
+      POSTGRES_PASSWORD: llstylish
+      POSTGRES_DB: calcdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skander -d calcdb"]
+      interval: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

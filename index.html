@@ -30,7 +30,7 @@
 <body>
   <div class="card">
     <h1>Calc API</h1>
-    <p class="sub">Backend: <code>http://localhost:8000</code></p>
+    <p class="sub">Backend: <code>/api → nginx → backend:8000</code></p>
 
     <div class="ops">
       <button class="op-btn active" onclick="setOp('add', this)">+ Add</button>
@@ -80,7 +80,7 @@
       resEl.className = 'result-value';
 
       try {
-        const resp = await fetch(`http://localhost:8000/${op}`, {
+        const resp = await fetch(`/api/${op}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ a, b })
