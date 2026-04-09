@@ -32,3 +32,9 @@ docker stop homelab
 cd ~/homelab
 docker compose down
 docker compose up -d --build
+
+docker compose down -v means:
+#down — stop and remove containers and networks
+#-v — also delete all named volumes (postgres_data in your case)
+
+docker exec -it homelab-db-1 psql -U skander -d calcdb -c "SELECT * FROM history;"
