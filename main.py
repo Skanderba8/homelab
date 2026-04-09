@@ -72,7 +72,7 @@ def save(operation, a, b, result=None, error=None):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": "2.0"}
 
 
 # --- Calculations ---
