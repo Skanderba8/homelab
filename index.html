@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calc API</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #f5f5f5; display: flex; justify-content: center; padding: 3rem 1rem; }
+    .card { background: white; border-radius: 12px; border: 1px solid #e0e0e0; padding: 2rem; width: 100%; max-width: 400px; }
+    h1 { font-size: 18px; font-weight: 500; margin-bottom: 0.25rem; }
+    .sub { font-size: 13px; color: #888; margin-bottom: 1.5rem; }
+    .ops { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 1.5rem; }
+    .op-btn { padding: 10px; border: 1px solid #ddd; border-radius: 8px; background: white; font-size: 14px; cursor: pointer; }
+    .op-btn:hover { background: #f5f5f5; }
+    .op-btn.active { border: 2px solid #3b82f6; color: #1d4ed8; font-weight: 500; }
+    .op-btn.span2 { grid-column: span 2; }
+    .inputs { display: flex; gap: 12px; margin-bottom: 1rem; }
+    input[type=number] { flex: 1; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; outline: none; }
+    input[type=number]:focus { border-color: #3b82f6; }
+    .result-box { background: #f9f9f9; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; min-height: 64px; }
+    .result-label { font-size: 12px; color: #888; margin-bottom: 4px; }
+    .result-value { font-size: 28px; font-weight: 500; }
+    .result-value.error { font-size: 14px; color: #dc2626; }
+    .calc-btn { width: 100%; padding: 11px; border: 1px solid #ddd; border-radius: 8px; background: white; font-size: 15px; cursor: pointer; }
+    .calc-btn:hover { background: #f5f5f5; }
+    .status { font-size: 12px; color: #aaa; text-align: center; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Calc API</h1>
+    <p class="sub">Backend: <code>http://localhost:8000</code></p>
+
+    <div class="ops">
+      <button class="op-btn active" onclick="setOp('add', this)">+ Add</button>
+      <button class="op-btn" onclick="setOp('subtract', this)">− Subtract</button>
+      <button class="op-btn" onclick="setOp('multiply', this)">× Multiply</button>
+      <button class="op-btn" onclick="setOp('divide', this)">÷ Divide</button>
+      <button class="op-btn span2" onclick="setOp('power', this)">^ Power</button>
+    </div>
+
+    <div class="inputs">
+      <input type="number" id="a" placeholder="a" value="10" />
+      <input type="number" id="b" placeholder="b" value="5" />
+    </div>
+
+    <div class="result-box">
+      <div class="result-label" id="res-label">Result</div>
+      <div class="result-value" id="res-value">—</div>
+    </div>
+
+    <button class="calc-btn" onclick="calculate()">Calculate</button>
+    <p class="status" id="status"></p>
+  </div>
+
+  <script>
+    let op = 'add';
+
+    function setOp(newOp, btn) {
+      op = newOp;
+      document.querySelectorAll('.op-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+
+    async function calculate() {
+      const a = parseFloat(document.getElementById('a').value);
+      const b = parseFloat(document.getElementById('b').value);
+      const resEl = document.getElementById('res-value');
+      const labelEl = document.getElementById('res-label');
+      const statusEl = document.getElementById('status');
+
+      if (isNaN(a) || isNaN(b)) {
+        resEl.textContent = 'Enter valid numbers';
+        resEl.className = 'result-value error';
+        return;
+      }
+
+      statusEl.textContent = 'Calling API...';
+      resEl.className = 'result-value';
+
+      try {
+        const resp = await fetch(`http://localhost:8000/${op}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ a, b })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          resEl.textContent = data.detail || 'Error';
+          resEl.className = 'result-value error';
+          statusEl.textContent = `HTTP ${resp.status}`;
+        } else {
+          resEl.textContent = parseFloat(data.result.toFixed(6)).toString();
+          labelEl.textContent = `${a} ${opSymbol(op)} ${b}`;
+          statusEl.textContent = `POST /${op} — 200 OK`;
+        }
+      } catch (e) {
+        resEl.textContent = 'Could not reach API';
+        resEl.className = 'result-value error';
+        statusEl.textContent = 'Is your server running?';
+      }
+    }
+
+    function opSymbol(op) {
+      return { add: '+', subtract: '−', multiply: '×', divide: '÷', power: '^' }[op];
+    }
+  </script>
+</body>
+</html>
