@@ -7,20 +7,15 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: SSH into VM and deploy
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd ~/homelab
-            git pull origin main
-            docker compose down
-            docker compose up -d --build
+      - name: Deploy
+        run: |
+          cd ~/homelab
+          git pull origin main
+          docker compose down
+          docker compose up -d --build

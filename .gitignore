@@ -175,3 +175,5 @@ temp/
 *.ear
 *.dll
 *.exe
+
+actions-runner/
