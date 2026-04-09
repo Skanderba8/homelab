@@ -103,7 +103,7 @@ All POST endpoints accept `{"a": 10, "b": 5}`.
 
 ```bash
 # clone the repo
-git clone https://github.com/YOUR_USERNAME/homelab
+git clone https://github.com/Skanderba8/homelab
 cd homelab
 
 # start all containers
