@@ -6,16 +6,24 @@ on:
       - main
 
 jobs:
-  deploy:
-    runs-on: self-hosted
+  provision:
+    runs-on: ubuntu-latest  # this job runs on GitHub's hosted runner
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Deploy
+      - name: Fetch runner registration token
+        id: get_token
         run: |
-          cd ~/homelab
-          git pull origin main
-          docker compose down
-          docker compose up -d --build
+          TOKEN=$(curl -s -X POST \
+            -H "Authorization: token ${{ secrets.RUNNER_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Skanderba8/homelab/actions/runners/registration-token \
+            | jq -r '.token')
+          echo "runner_token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Run Ansible playbook
+        run: |
+          ansible-playbook playbook.yml -i inventory.ini \
+            --extra-vars "github_runner_token=${{ steps.get_token.outputs.runner_token }}"
