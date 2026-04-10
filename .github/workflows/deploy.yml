@@ -7,11 +7,20 @@ on:
 
 jobs:
   provision:
-    runs-on: ubuntu-latest  # this job runs on GitHub's hosted runner
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Install Ansible
+        run: sudo apt-get install -y ansible
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/homelab-ec2
+          chmod 600 ~/.ssh/homelab-ec2
 
       - name: Fetch runner registration token
         id: get_token
@@ -25,5 +34,5 @@ jobs:
 
       - name: Run Ansible playbook
         run: |
-          ansible-playbook playbook.yml -i inventory.ini \
+          ansible-playbook ansible/playbook.yml -i ansible/inventory.ini \
             --extra-vars "github_runner_token=${{ steps.get_token.outputs.runner_token }}"
