@@ -38,3 +38,5 @@ docker compose down -v means:
 #-v — also delete all named volumes (postgres_data in your case)
 
 docker exec -it homelab-db-1 psql -U skander -d calcdb -c "SELECT * FROM history;"
+
+aws ec2 describe-instances --filters "Name=tag:Name,Values=homelab" --query "Reservations[].Instances[].State.Name" --output text

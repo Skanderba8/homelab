@@ -1,12 +1,12 @@
-# homelab — devops learning project
+# homelab
 
-A simple calculator app built to learn and practice core DevOps concepts hands-on. Every piece of this stack was added deliberately as a learning exercise.
+A calculator app built from scratch as a hands-on DevOps learning project. The app itself is intentionally simple — the point is everything around it: containers, networking, databases, CI/CD, and cloud deployment.
 
 ---
 
-## what this project is
+## what this is
 
-A calculator API with a frontend and a database, running on a local VM, fully containerized and automatically deployed via CI/CD. The app itself is simple by design — the point is the infrastructure around it.
+A FastAPI backend with a frontend served by nginx and a PostgreSQL database, fully containerized with Docker Compose, deployed on AWS EC2, accessible at [homelab.skander.cc](http://homelab.skander.cc), and automatically deployed on every git push via GitHub Actions.
 
 ---
 
@@ -14,71 +14,43 @@ A calculator API with a frontend and a database, running on a local VM, fully co
 
 | Layer | Technology | Why |
 |---|---|---|
-| Backend | FastAPI (Python) | Simple, fast to write, easy to test with curl |
-| Frontend | HTML + nginx | Minimal UI to interact with the API |
-| Database | PostgreSQL | Industry standard relational db |
+| Backend | FastAPI (Python) | Simple, fast to write, easy to curl-test |
+| Frontend | HTML + nginx | Minimal UI, no framework needed |
+| Database | PostgreSQL | Industry standard, runs great in Docker |
 | Containers | Docker + Docker Compose | Reproducible, isolated environments |
-| CI/CD | GitHub Actions (self-hosted) | Automated deployment on every push |
-| VM | VirtualBox (Linux Mint) | Local environment to simulate a real server |
-
----
-
-## project structure
-
-```
-homelab/
-├── main.py                        # FastAPI app — all backend logic
-├── Dockerfile                     # recipe to build the backend container
-├── docker-compose.yml             # orchestrates all 3 containers
-├── nginx.conf                     # nginx routing — serves frontend, proxies API
-├── index.html                     # frontend UI
-├── .gitignore                     # keeps secrets and junk out of git
-├── actions-runner/                # self-hosted GitHub Actions runner (gitignored)
-└── .github/
-    └── workflows/
-        └── deploy.yml             # CI/CD pipeline definition
-```
+| CI/CD | GitHub Actions (self-hosted runner) | Auto-deploy on push, runner lives on EC2 |
+| Server | AWS EC2 t3.micro | Real cloud server, free tier eligible |
+| DNS | Cloudflare | homelab.skander.cc → EC2 IP |
 
 ---
 
 ## architecture
 
 ```
-Your Browser
-     │
-     │ http://VM_IP:8080 (only public port)
-     ▼
-┌─────────────────────────────────────────────────┐
-│                  VirtualBox VM                  │
-│                                                 │
-│  ┌──────────────────────────────────────────┐   │
-│  │           Docker Network                 │   │
-│  │                                          │   │
-│  │  ┌────────────┐                          │   │
-│  │  │  frontend  │ nginx — port 8080        │   │
-│  │  │            │                          │   │
-│  │  │ /          │→ serves index.html       │   │
-│  │  │ /api/*     │→ proxies to backend:8000 │   │
-│  │  └─────┬──────┘                          │   │
-│  │        │ internal                        │   │
-│  │        ▼ http://backend:8000             │   │
-│  │  ┌────────────┐                          │   │
-│  │  │  backend   │ fastapi — not exposed    │   │
-│  │  │            │                          │   │
-│  │  │ main.py    │→ handles calculations    │   │
-│  │  │            │→ saves to db             │   │
-│  │  └─────┬──────┘                          │   │
-│  │        │ internal                        │   │
-│  │        ▼ http://db:5432                  │   │
-│  │  ┌────────────┐                          │   │
-│  │  │     db     │ postgres — not exposed   │   │
-│  │  │  calcdb    │→ stores history table    │   │
-│  │  └────────────┘                          │   │
-│  └──────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
+Browser
+  │
+  │ http://homelab.skander.cc (port 80)
+  ▼
+Cloudflare DNS → EC2 eu-west-3
+  │
+  ▼
+┌─────────────────────────────────────────┐
+│           Docker Network                │
+│                                         │
+│  nginx (port 80, public)                │
+│    /        → index.html               │
+│    /api/*   → proxy to backend:8000    │
+│         │                               │
+│         ▼ internal                      │
+│  fastapi (port 8000, internal only)     │
+│         │                               │
+│         ▼ internal                      │
+│  postgres (port 5432, internal only)    │
+│  data persisted in Docker volume        │
+└─────────────────────────────────────────┘
 ```
 
-Only one port is exposed to the outside. The backend and database are invisible to the internet — only reachable internally by container name.
+Only port 80 is exposed. The backend and database are never reachable from the outside world.
 
 ---
 
@@ -92,35 +64,33 @@ Only one port is exposed to the outside. The backend and database are invisible 
 | POST | `/api/multiply` | a × b |
 | POST | `/api/divide` | a ÷ b (handles division by zero) |
 | POST | `/api/power` | a ^ b |
-| GET | `/api/history` | last 20 calculations from db |
+| GET | `/api/history` | last 20 calculations |
 | DELETE | `/api/history` | clear all history |
 
 All POST endpoints accept `{"a": 10, "b": 5}`.
 
 ---
 
-## how to run
+## project structure
 
-```bash
-# clone the repo
-git clone https://github.com/Skanderba8/homelab
-cd homelab
-
-# start all containers
-docker compose up -d --build
-
-# verify everything is running
-docker ps
-
-# test the api
-curl http://localhost:8080/api/health
+```
+homelab/
+├── main.py                        # FastAPI app — all backend logic + postgres
+├── Dockerfile                     # builds the backend container
+├── docker-compose.yml             # orchestrates nginx, fastapi, postgres
+├── nginx.conf                     # serves frontend, proxies /api/* to backend
+├── index.html                     # frontend UI
+├── .gitignore
+└── .github/
+    └── workflows/
+        └── deploy.yml             # CI/CD pipeline
 ```
 
 ---
 
 ## ci/cd pipeline
 
-Every push to `main` triggers an automatic deployment.
+Every push to `main` triggers automatic deployment.
 
 ```
 git push origin main
@@ -129,79 +99,78 @@ git push origin main
 GitHub detects push → triggers deploy.yml
         │
         ▼
-self-hosted runner on VM picks up the job
+self-hosted runner on EC2 picks up the job
         │
-        ├── pulls latest code
+        ├── git pull origin main
         ├── docker compose down
         └── docker compose up -d --build
 ```
 
-The runner is a process running permanently on the VM. It polls GitHub for jobs — no open port needed, the VM reaches out to GitHub, not the other way around.
+The runner is a process running permanently on EC2. It polls GitHub outbound — no open port needed, no SSH from GitHub into the server.
+
+**Why self-hosted instead of GitHub-hosted:**
+GitHub-hosted runners are fresh VMs on GitHub's servers. They have no access to your private EC2. A self-hosted runner lives on EC2 itself, so deployment is just running commands locally — no SSH juggling needed.
 
 ---
 
-## what i learned
+## running locally
 
-**Docker**
-- A Dockerfile builds a single image for a custom app
-- Docker Compose orchestrates multiple containers together
-- Containers talk to each other by service name (internal DNS)
-- `expose` makes a port internal only — `ports` makes it public
-- Volumes persist data outside containers so it survives restarts
-- `down -v` wipes volumes — useful for resetting db state
-
-**Networking**
-- Only expose what needs to be public (in this case, just nginx on 8080)
-- nginx acts as a reverse proxy — one public entry point that routes traffic internally
-- Browser API calls go through nginx (`/api/*`) instead of hitting the backend directly
-
-**Database**
-- postgres runs as its own container with a named volume for persistence
-- Health checks tell Docker when postgres is actually ready (not just started)
-- `depends_on: condition: service_healthy` makes backend wait for db to be ready
-- `psycopg2` connects Python to postgres — uses `%s` placeholders, not `?`
-
-**CI/CD**
-- GitHub Actions reads `.github/workflows/deploy.yml` on every push
-- `runs-on: self-hosted` uses your own machine instead of GitHub's servers
-- Self-hosted runner = your VM connects to GitHub and waits for jobs
-- No open ports needed — the VM polls GitHub outbound
-
----
-
-## best practices applied
-
-- secrets stay out of code — db credentials live in `docker-compose.yml` environment vars, never hardcoded
-- backend is not exposed publicly — only nginx faces the outside
-- database is not exposed publicly — only backend can reach it
-- `.gitignore` covers credentials, venv, pycache, runner binaries
-- one command to start everything — `docker compose up -d --build`
-- health checks ensure startup order is correct, not just fast
-- data persists across container restarts via named volumes
-- CI/CD means no manual SSH deploys — push code, it ships
+```bash
+git clone https://github.com/YOUR_USERNAME/homelab
+cd homelab
+docker compose up -d --build
+docker ps
+curl http://localhost/api/health
+```
 
 ---
 
 ## useful commands
 
 ```bash
-# container management
-docker ps                          # see running containers
-docker compose up -d --build       # start everything, rebuild images
-docker compose down                # stop everything
-docker compose down -v             # stop everything + wipe volumes
-docker logs homelab-backend-1      # see backend logs
-docker compose restart frontend    # restart one container
+# containers
+docker ps
+docker compose up -d --build
+docker compose down
+docker compose down -v          # wipe volumes (resets database)
+docker logs homelab-backend-1
+docker compose restart frontend
 
-# database access
+# database
 docker exec -it homelab-db-1 psql -U skander -d calcdb
-  \dt                              # list tables
-  SELECT * FROM history;           # see all calculations
-  \q                               # exit
+  \dt                           # list tables
+  SELECT * FROM history;        # see all calculations
+  \q                            # exit
 
 # test api
-curl http://localhost:8080/api/health
-curl -X POST http://localhost:8080/api/add \
+curl http://localhost/api/health
+curl -X POST http://localhost/api/add \
   -H "Content-Type: application/json" \
   -d '{"a": 10, "b": 5}'
 ```
+
+---
+
+## things learned
+
+**Docker**
+- Dockerfile builds a single reusable image. Image = blueprint, container = running instance.
+- Docker Compose orchestrates multiple containers. Each service gets its own container.
+- `expose` makes a port internal only. `ports` maps it to the host (public).
+- Containers find each other by service name — Docker has internal DNS that resolves `backend`, `db` etc to the right container IP automatically.
+- Named volumes persist data outside containers. `docker compose down -v` deletes them — useful for resetting state.
+
+**Networking**
+- nginx as a reverse proxy means one public port handles everything. `/api/*` gets forwarded internally to FastAPI.
+- CORS issues happen when a browser calls a different origin. Two fixes: CORS middleware in FastAPI (quick fix), and routing all calls through nginx on the same origin (proper fix).
+
+**Database**
+- `depends_on` only waits for the container to start, not for postgres to be ready to accept connections.
+- Health checks (`pg_isready`) fix this — Docker marks the container healthy only when postgres actually responds.
+- `condition: service_healthy` makes the backend wait for that signal before starting.
+- First boot initializes postgres with credentials from environment variables. If a volume exists from a previous run with different credentials, postgres ignores the new ones — `down -v` wipes the volume and forces re-initialization.
+
+**CI/CD**
+- GitHub Actions reads `.github/workflows/deploy.yml` on every push to main.
+- Self-hosted runner = your server polls GitHub, picks up jobs, runs them locally.
+- No open port needed — outbound connection from server to GitHub, not the other way around.
