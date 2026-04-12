@@ -47,7 +47,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          debug: true
+          fingerprint: ${{ secrets.SSH_FINGERPRINT }}
           script: |
             cd ~/homelab
             git pull origin main
