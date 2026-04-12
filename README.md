@@ -1,6 +1,6 @@
 # homelab
 
-A calculator app built from scratch as a hands-on DevOps learning project. The app itself is intentionally simple — the point is everything around it: containers, networking, databases, secrets management, CI/CD, and cloud deployment.
+A calculator app built from scratch as a hands-on DevOps learning project. The app itself is intentionally simple — the point is everything around it: containers, networking, databases, secrets management, CI/CD, cloud deployment, and image registries.
 
 ---
 
@@ -18,7 +18,8 @@ A FastAPI backend with a frontend served by nginx and a PostgreSQL database, ful
 | Frontend | HTML + nginx | Minimal UI, no framework needed |
 | Database | PostgreSQL | Industry standard, runs great in Docker |
 | Containers | Docker + Docker Compose | Reproducible, isolated environments |
-| CI/CD | GitHub Actions (self-hosted runner) | Auto-deploy on push, runner lives on EC2 |
+| Image Registry | AWS ECR | Private registry — images built in CI, pulled on EC2 |
+| CI/CD | GitHub Actions (hosted runners) | Build image, push to ECR, SSH deploy on every push |
 | Server | AWS EC2 t3.micro | Real cloud server, free tier eligible |
 | DNS | Cloudflare | homelab.skander.cc → EC2 IP |
 
@@ -38,8 +39,8 @@ Cloudflare DNS → EC2 eu-west-3
 │           Docker network                │
 │                                         │
 │  nginx (port 80, public)                │
-│    /        → index.html               │
-│    /api/*   → proxy to backend:8000    │
+│    /        → index.html                │
+│    /api/*   → proxy to backend:8000     │
 │         │                               │
 │         ▼ internal                      │
 │  fastapi (port 8000, internal only)     │
@@ -59,7 +60,7 @@ Only port 80 is exposed. The backend and database are never reachable from the o
 ```
 homelab/
 ├── main.py                        # FastAPI app — all backend logic + postgres
-├── Dockerfile                     # builds the backend container
+├── Dockerfile                     # builds the backend container image
 ├── docker-compose.yml             # orchestrates nginx, fastapi, postgres
 ├── nginx.conf                     # serves frontend, proxies /api/* to backend
 ├── index.html                     # frontend UI
@@ -94,7 +95,6 @@ All POST endpoints accept `{"a": 10, "b": 5}`.
 Secrets are never hardcoded in this repo. `docker-compose.yml` uses `${VARIABLE}` placeholders and reads values from a `.env` file in the same directory.
 
 ```yaml
-# docker-compose.yml reads variables like this:
 environment:
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
   DATABASE_URL: ${DATABASE_URL}
@@ -109,13 +109,8 @@ POSTGRES_USER=youruser
 POSTGRES_PASSWORD=yourpassword
 POSTGRES_DB=calcdb
 DATABASE_URL=postgresql://youruser:yourpassword@db:5432/calcdb
+ECR_REPOSITORY_URL=<account-id>.dkr.ecr.eu-west-3.amazonaws.com/homelab
 EOF
-```
-
-**Verify secrets loaded correctly:**
-```bash
-docker compose exec db env | grep POSTGRES
-docker compose exec backend env | grep DATABASE_URL
 ```
 
 **Important — changing the postgres password:**
@@ -125,6 +120,43 @@ docker compose exec db psql -U postgres -c \
   "ALTER USER youruser WITH PASSWORD 'newpassword';"
 docker compose restart backend
 ```
+
+---
+
+## ci/cd pipeline
+
+Every push to `main` triggers automatic deployment via two sequential jobs.
+
+```
+git push origin main
+        │
+        ▼
+Job 1: build-and-push (GitHub-hosted runner)
+  ├── checkout code
+  ├── authenticate to ECR
+  ├── docker build
+  └── docker push (tagged with git SHA + latest)
+        │
+        ▼ (only runs if Job 1 succeeded)
+Job 2: deploy (GitHub-hosted runner)
+  ├── SSH into EC2
+  ├── git pull origin main
+  ├── docker compose pull
+  └── docker compose up -d
+```
+
+EC2 never builds anything — it only pulls the pre-built image from ECR. Every deployed image is permanently addressable by its git SHA for easy rollbacks.
+
+**GitHub Actions secrets required:**
+
+| Secret | Value |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | IAM user with ECR push permissions |
+| `AWS_SECRET_ACCESS_KEY` | IAM user secret |
+| `ECR_REPOSITORY_URL` | `<account-id>.dkr.ecr.eu-west-3.amazonaws.com/homelab` |
+| `SSH_HOST` | `homelab.skander.cc` |
+| `SSH_USER` | `ubuntu` |
+| `SSH_PRIVATE_KEY` | contents of `~/.ssh/homelab-ec2` |
 
 ---
 
@@ -147,38 +179,6 @@ curl http://localhost/api/health
 
 ---
 
-## ci/cd pipeline
-
-Every push to `main` triggers automatic deployment.
-
-```
-git push origin main
-        │
-        ▼
-GitHub detects push → triggers deploy.yml
-        │
-        ▼
-self-hosted runner on EC2 picks up the job
-        │
-        ├── git pull origin main
-        └── docker compose up -d --build
-```
-
-The runner is a process running permanently on EC2, installed as a systemd service. It polls GitHub outbound — no open port needed, no SSH from GitHub into the server.
-
-**Current deploy.yml behavior:**
-- `docker compose up -d --build` without `down` first — avoids unnecessary downtime
-- Compose only restarts containers whose image actually changed
-- Build happens on the EC2 itself (no image registry yet)
-
-**Why self-hosted instead of GitHub-hosted:**
-GitHub-hosted runners are fresh VMs with no access to your EC2. A self-hosted runner lives on EC2 itself — deployment is just running commands locally.
-
-**Important — multiple runners:**
-If more than one runner is registered with the `self-hosted` label, GitHub picks whichever is available. This causes jobs to silently run on the wrong machine. Always check GitHub → Settings → Actions → Runners and remove stale runners.
-
----
-
 ## debugging checklist
 
 If the app isn't loading at homelab.skander.cc, check in this order:
@@ -192,38 +192,32 @@ docker ps
 **2. Check container logs for errors:**
 ```bash
 docker compose logs --tail=50
-docker logs homelab-backend-1   # backend startup errors
+docker logs homelab-backend-1
 ```
 
 **3. Is the backend reachable internally?**
 ```bash
 docker compose exec frontend wget -qO- http://backend:8000/health
-# should return {"status":"ok"}
-# if 500 → backend is up but hitting an error (check logs)
-# if connection refused → backend container is down
 ```
 
 **4. Is nginx config valid?**
 ```bash
 docker compose exec frontend nginx -t
-# should say "syntax is ok"
 ```
 
 **5. Does nginx correctly strip /api before forwarding?**
-The nginx config uses trailing slashes on both sides:
 ```nginx
 location /api/ {
     proxy_pass http://backend:8000/;   # trailing slash strips /api prefix
 }
 ```
-`/api/add` becomes `/add` at the backend. If you remove either trailing slash, the full path is forwarded and the backend gets `/api/add` which it doesn't have — 404.
+`/api/add` becomes `/add` at the backend. Remove either trailing slash and the backend gets `/api/add` — 404.
 
 **6. Is the .env file present on EC2?**
 ```bash
 cat /home/ubuntu/homelab/.env
 ls -la /home/ubuntu/homelab/.env   # should show -rw------- (mode 600)
 ```
-If missing, re-run Ansible from the infra repo.
 
 **7. Does DNS resolve to the right IP?**
 ```bash
@@ -234,9 +228,6 @@ curl ifconfig.me   # run on EC2 — should match
 **8. Is the browser forcing HTTPS?**
 The app only runs on HTTP (port 80). Try `http://homelab.skander.cc` explicitly.
 
-**9. Are CI/CD jobs running on the right runner?**
-GitHub → Actions → latest run → check `Runner name` in logs. Should say `ec2-runner`.
-
 ---
 
 ## useful commands
@@ -244,11 +235,10 @@ GitHub → Actions → latest run → check `Runner name` in logs. Should say `e
 ```bash
 # containers
 docker ps
-docker compose up -d --build
+docker compose up -d
 docker compose down
-docker compose down -v              # wipe volumes (resets database completely)
+docker compose down -v              # wipe volumes (resets database)
 docker compose logs --tail=50
-docker logs homelab-backend-1
 docker compose restart backend
 
 # test api
@@ -257,25 +247,19 @@ curl -X POST http://localhost/api/add \
   -H "Content-Type: application/json" \
   -d '{"a": 10, "b": 5}'
 
-# verify secrets loaded
-docker compose exec db env | grep POSTGRES
-docker compose exec backend env | grep DATABASE_URL
-
 # database
 docker exec -it homelab-db-1 psql -U skander -d calcdb
   \dt                              # list tables
-  SELECT * FROM history;           # see all calculations
+  SELECT * FROM history;
   \q                               # exit
 
-# change postgres password (after updating .env)
+# change postgres password
 docker exec -it homelab-db-1 psql -U postgres -c \
   "ALTER USER skander WITH PASSWORD 'newpassword';"
 docker compose restart backend
 
-# check runner on EC2
-systemctl status actions.runner.*
-journalctl -u actions.runner.* -n 50
-sudo systemctl restart actions.runner.Skanderba8-homelab.ec2-runner.service
+# trigger deploy without code changes
+git commit --allow-empty -m "redeploy" && git push
 
 # check DNS
 nslookup homelab.skander.cc
@@ -287,37 +271,31 @@ curl ifconfig.me   # run on EC2
 ## issues encountered and how they were fixed
 
 **"Could not reach API" in the frontend**
-The `fetch()` call hits the `catch` block — meaning the request failed entirely, not a 4xx/5xx. Check containers are running and backend logs for startup crashes.
+The `fetch()` call hits the `catch` block — request failed entirely. Check containers are running and backend logs for startup crashes.
 
 **Backend container exits immediately on startup**
-`init_db()` runs at import time. If postgres connection fails (wrong password, db not ready), Python crashes before FastAPI even starts. Check `docker logs homelab-backend-1` for the exact error.
+`init_db()` runs at import time. If postgres connection fails, Python crashes before FastAPI starts. Check `docker logs homelab-backend-1` for the exact error.
 
 **Postgres password mismatch after changing .env**
-`POSTGRES_PASSWORD` only sets the password on first volume creation. Changing it afterward has no effect. Fix: `ALTER USER` inside the container, then restart backend.
+`POSTGRES_PASSWORD` only sets the password on first volume creation. Fix: `ALTER USER` inside the container, then restart backend.
 
 **nginx 404 on /api routes**
-Check the trailing slash on `proxy_pass`. `proxy_pass http://backend:8000/` (with slash) strips the `/api` prefix. Without the slash, the full path is forwarded and the backend returns 404.
-
-**Secrets visible in git history**
-`git log --all -p | grep yourpassword` reveals old commits. Changing the password is the real fix — git history rewriting is cosmetic once the repo is public. Always check `git grep` before pushing.
+Trailing slash on `proxy_pass` matters. `http://backend:8000/` strips the `/api` prefix. Without it, the full path is forwarded and backend returns 404.
 
 **docker compose down causes downtime**
-`down` then `up` kills the app completely between commands. Use `docker compose up -d --build` directly — Compose only restarts containers whose image changed.
+`down` then `up` kills the app completely between commands. Use `docker compose up -d` directly — Compose only restarts containers whose image changed.
 
 **App not loading despite containers being up**
 DNS was pointing to old EC2 IP after a destroy/apply. Fixed by running `terraform apply` which updated the Cloudflare A record automatically.
 
-**CI/CD running on local VM instead of EC2**
-Two self-hosted runners registered. Fixed by removing the old runner from GitHub → Settings → Actions → Runners.
+**SSH authentication failing from GitHub Actions**
+Multiple issues stacked:
+- `appleboy/ssh-action` fingerprint verification kept failing — abandoned in favour of plain `ssh` command
+- `printf '%s'` strips trailing newline causing `error in libcrypto` — fixed with `echo | tr -d '\r'`
+- `SSH_USER` secret was set to `skander` instead of `ubuntu` — root cause, found via `/var/log/auth.log`
 
-**Port 80 already in use**
-Old frontend container still running. Fixed with `docker compose down` then `docker compose up -d --build`.
-
-**Docker build using cached old files**
-Force a clean build:
-```bash
-docker compose up -d --build --no-cache
-```
+**ECR image not found on first deploy**
+Fresh ECR registry is empty — `docker compose pull` fails. Ansible now checks image count before starting containers and skips on first provision. First real deploy happens via GitHub Actions after pushing a commit.
 
 ---
 
@@ -325,29 +303,31 @@ docker compose up -d --build --no-cache
 
 **Docker**
 - Dockerfile builds an image. Image = blueprint, container = running instance.
-- `expose` makes a port internal only. `ports` maps it to the host (public).
+- `expose` makes a port internal only. `ports` maps it to the host.
 - Containers find each other by service name — Docker's internal DNS resolves `backend`, `db` etc.
 - Named volumes persist data outside containers. `down -v` deletes them — resets all state.
 
+**ECR**
+- Build once in CI, pull everywhere — EC2 should never compile code.
+- Every image gets two tags: `latest` (what EC2 pulls) and the git SHA (permanent addressable record).
+- EC2 authenticates to ECR via IAM instance profile — no credentials stored on the server.
+
 **Secrets**
 - Never hardcode secrets in files that get committed.
-- Docker Compose automatically loads `.env` from the same directory — no configuration needed.
-- `${VARIABLE}` in docker-compose.yml reads from `.env`.
-- `docker inspect` shows env vars — expected behavior, only accessible via SSH.
-- `git grep yourpassword` — always run this before pushing to check for leaks.
+- Docker Compose automatically loads `.env` from the same directory.
+- `git log --all -p | grep yourpassword` — always run before pushing to check for leaks.
 
 **Networking**
 - nginx as reverse proxy: one public port handles everything. `/api/*` forwarded internally to FastAPI.
-- Trailing slash on `proxy_pass` matters: `http://backend:8000/` strips the matched prefix, `http://backend:8000` does not.
+- Trailing slash on `proxy_pass` matters: `http://backend:8000/` strips the matched prefix.
 
 **Database**
 - `depends_on` only waits for container start, not postgres readiness. Health checks fix this.
-- `condition: service_healthy` waits for `pg_isready` to succeed before starting backend.
+- `condition: service_healthy` waits for `pg_isready` before starting backend.
 - First boot initializes postgres from env vars. Existing volume = env vars ignored on restart.
-- `ALTER USER` is the only way to change password on a running database.
 
 **CI/CD**
 - GitHub Actions reads `.github/workflows/deploy.yml` on every push to main.
-- Self-hosted runner = your server polls GitHub, picks up jobs, runs them locally.
-- `docker compose up -d --build` without `down` = zero unnecessary downtime.
-- Multiple runners with same label = jobs go to wrong machine.
+- `needs:` ensures deploy job never runs if build+push failed.
+- `docker compose up -d` without `down` = only changed containers restart.
+- Check `/var/log/auth.log` on the server when SSH auth fails — it shows the exact rejection reason and what username was used.
