@@ -31,10 +31,13 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          # Build Backend
           docker build -t $ECR_REGISTRY/homelab:$IMAGE_TAG -t $ECR_REGISTRY/homelab:latest .
-          docker push $ECR_REGISTRY/homelab:$IMAGE_TAG
           docker push $ECR_REGISTRY/homelab:latest
-          echo "image=$ECR_REGISTRY/homelab:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          
+          # Build Frontend
+          docker build -t $ECR_REGISTRY/homelab-frontend:$IMAGE_TAG -t $ECR_REGISTRY/homelab-frontend:latest -f frontend.Dockerfile .
+          docker push $ECR_REGISTRY/homelab-frontend:latest
 
   deploy:
     runs-on: ubuntu-latest
