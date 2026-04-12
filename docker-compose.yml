@@ -1,6 +1,6 @@
 services:
   backend:
-    build: .
+    image: 166799230506.dkr.ecr.eu-west-3.amazonaws.com/homelab:latest
     expose:
       - "8000"
     depends_on:
