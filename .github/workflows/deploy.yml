@@ -7,8 +7,6 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.build.outputs.image }}
 
     steps:
       - name: Checkout code
@@ -25,17 +23,17 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push image
+      - name: Build and push images
         id: build
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Build Backend
-          docker build -t $ECR_REGISTRY/homelab:$IMAGE_TAG -t $ECR_REGISTRY/homelab:latest .
-          docker push $ECR_REGISTRY/homelab:latest
+          # Build Backend (Now using backend.Dockerfile and homelab-backend repo)
+          docker build -t $ECR_REGISTRY/homelab-backend:$IMAGE_TAG -t $ECR_REGISTRY/homelab-backend:latest -f backend.Dockerfile .
+          docker push $ECR_REGISTRY/homelab-backend:latest
           
-          # Build Frontend
+          # Build Frontend (Using frontend.Dockerfile and homelab-frontend repo)
           docker build -t $ECR_REGISTRY/homelab-frontend:$IMAGE_TAG -t $ECR_REGISTRY/homelab-frontend:latest -f frontend.Dockerfile .
           docker push $ECR_REGISTRY/homelab-frontend:latest
 
@@ -49,7 +47,6 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           echo "$SSH_PRIVATE_KEY" | tr -d '\r' > /tmp/deploy_key
-          echo "" >> /tmp/deploy_key
           chmod 600 /tmp/deploy_key
           ssh -i /tmp/deploy_key \
             -o StrictHostKeyChecking=no \
