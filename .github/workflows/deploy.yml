@@ -5,12 +5,33 @@ on:
     branches: [main]
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend.Dockerfile'
+              - 'main.py'
+            frontend:
+              - 'frontend.Dockerfile'
+              - 'index.html'
+              - 'nginx.conf'
+
   build-and-push:
     runs-on: ubuntu-latest
-
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    outputs:
+      pull_args: ${{ steps.set-pull-args.outputs.pull_args }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -24,27 +45,41 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push images
-        id: build
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
+          BUILD_BACKEND: ${{ needs.changes.outputs.backend }}
+          BUILD_FRONTEND: ${{ needs.changes.outputs.frontend }}
         run: |
-          # Build Backend (Now using backend.Dockerfile and homelab-backend repo)
-          docker build -t $ECR_REGISTRY/homelab-backend:$IMAGE_TAG -t $ECR_REGISTRY/homelab-backend:latest -f backend.Dockerfile .
-          docker push $ECR_REGISTRY/homelab-backend:latest
-          
-          # Build Frontend (Using frontend.Dockerfile and homelab-frontend repo)
-          docker build -t $ECR_REGISTRY/homelab-frontend:$IMAGE_TAG -t $ECR_REGISTRY/homelab-frontend:latest -f frontend.Dockerfile .
-          docker push $ECR_REGISTRY/homelab-frontend:latest
+          if [ "$BUILD_BACKEND" = "true" ]; then
+            docker build -t $ECR_REGISTRY/homelab-backend:$IMAGE_TAG -t $ECR_REGISTRY/homelab-backend:latest -f backend.Dockerfile .
+            docker push $ECR_REGISTRY/homelab-backend:latest
+          fi
+          if [ "$BUILD_FRONTEND" = "true" ]; then
+            docker build -t $ECR_REGISTRY/homelab-frontend:$IMAGE_TAG -t $ECR_REGISTRY/homelab-frontend:latest -f frontend.Dockerfile .
+            docker push $ECR_REGISTRY/homelab-frontend:latest
+          fi
+
+      - name: Set pull args
+        id: set-pull-args
+        env:
+          BUILD_BACKEND: ${{ needs.changes.outputs.backend }}
+          BUILD_FRONTEND: ${{ needs.changes.outputs.frontend }}
+        run: |
+          ARGS=""
+          [ "$BUILD_BACKEND" = "true" ] && ARGS="$ARGS backend"
+          [ "$BUILD_FRONTEND" = "true" ] && ARGS="$ARGS frontend"
+          echo "pull_args=$ARGS" >> $GITHUB_OUTPUT
 
   deploy:
     runs-on: ubuntu-latest
-    needs: build-and-push
-
+    needs: [changes, build-and-push]
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     steps:
       - name: SSH and deploy
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          PULL_ARGS: ${{ needs.build-and-push.outputs.pull_args }}
         run: |
           echo "$SSH_PRIVATE_KEY" | tr -d '\r' > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
@@ -52,5 +87,5 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            "cd ~/homelab && git pull origin main && docker compose pull && docker compose up -d"
+            "cd ~/homelab && git pull origin main && docker compose pull $PULL_ARGS && docker compose up -d"
           rm /tmp/deploy_key
