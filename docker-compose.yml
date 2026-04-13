@@ -82,12 +82,14 @@ services:
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"
 
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:2.9.0
     restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
     expose:
       - "3100"
     volumes:
       - loki-data:/loki
+      - ./loki.yml:/etc/loki/local-config.yaml:ro
 
   promtail:
     image: grafana/promtail:latest
