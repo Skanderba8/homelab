@@ -54,7 +54,62 @@ services:
       test: ["CMD-SHELL", "pg_isready -U skander -d calcdb"]
       interval: 5s
       retries: 5
+prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    expose:
+      - "9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    expose:
+      - "3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_SERVER_ROOT_URL: https://grafana.skander.cc
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.skander.cc`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=le"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  loki:
+    image: grafana/loki:latest
+    restart: unless-stopped
+    expose:
+      - "3100"
+    volumes:
+      - loki-data:/loki
+
+  promtail:
+    image: grafana/promtail:latest
+    restart: unless-stopped
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./promtail.yml:/etc/promtail/config.yml:ro
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
 
 volumes:
   postgres_data:
   traefik-certs:
+  prometheus-data:
+  grafana-data:
+  loki-data:
