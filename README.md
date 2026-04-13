@@ -331,3 +331,4 @@ Fresh ECR registry is empty — `docker compose pull` fails. Ansible now checks 
 - `needs:` ensures deploy job never runs if build+push failed.
 - `docker compose up -d` without `down` = only changed containers restart.
 - Check `/var/log/auth.log` on the server when SSH auth fails — it shows the exact rejection reason and what username was used.
+*
