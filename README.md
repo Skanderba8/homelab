@@ -452,4 +452,4 @@ Monitoring stack (Grafana 142MB + Prometheus 85MB + Loki 64MB + cAdvisor 63MB) c
 - **Alerting** — Grafana alerts to email or Slack when a container is down or memory exceeds 80%.
 - **Uptime monitoring** — HTTP health check hitting `/api/health` every minute with alerting on failure.
 - **Multi-environment** — `staging` branch + separate Terraform workspace for testing infra changes before prod.
-- **Terraform remote state** — move `terraform.tfstate` to S3 so it's not sitting on a local machine.
+- **Terraform remote state** — move `terraform.tfstate` to S3 so it's not sitting on a local machine
