@@ -3,6 +3,12 @@ name: Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force full build and deploy (use after infra rebuild)'
+        required: false
+        default: 'false'
 
 jobs:
   changes:
@@ -27,7 +33,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || github.event.inputs.force_build == 'true'
     outputs:
       pull_args: ${{ steps.set-pull-args.outputs.pull_args }}
     steps:
@@ -50,13 +56,16 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           BUILD_BACKEND: ${{ needs.changes.outputs.backend }}
           BUILD_FRONTEND: ${{ needs.changes.outputs.frontend }}
+          FORCE_BUILD: ${{ github.event.inputs.force_build }}
         run: |
-          if [ "$BUILD_BACKEND" = "true" ]; then
+          if [ "$BUILD_BACKEND" = "true" ] || [ "$FORCE_BUILD" = "true" ]; then
             docker build -t $ECR_REGISTRY/homelab-backend:$IMAGE_TAG -t $ECR_REGISTRY/homelab-backend:latest -f backend.Dockerfile .
+            docker push $ECR_REGISTRY/homelab-backend:$IMAGE_TAG
             docker push $ECR_REGISTRY/homelab-backend:latest
           fi
-          if [ "$BUILD_FRONTEND" = "true" ]; then
+          if [ "$BUILD_FRONTEND" = "true" ] || [ "$FORCE_BUILD" = "true" ]; then
             docker build -t $ECR_REGISTRY/homelab-frontend:$IMAGE_TAG -t $ECR_REGISTRY/homelab-frontend:latest -f frontend.Dockerfile .
+            docker push $ECR_REGISTRY/homelab-frontend:$IMAGE_TAG
             docker push $ECR_REGISTRY/homelab-frontend:latest
           fi
 
@@ -65,16 +74,21 @@ jobs:
         env:
           BUILD_BACKEND: ${{ needs.changes.outputs.backend }}
           BUILD_FRONTEND: ${{ needs.changes.outputs.frontend }}
+          FORCE_BUILD: ${{ github.event.inputs.force_build }}
         run: |
-          ARGS=""
-          [ "$BUILD_BACKEND" = "true" ] && ARGS="$ARGS backend"
-          [ "$BUILD_FRONTEND" = "true" ] && ARGS="$ARGS frontend"
-          echo "pull_args=$ARGS" >> $GITHUB_OUTPUT
+          if [ "$FORCE_BUILD" = "true" ]; then
+            echo "pull_args=backend frontend" >> $GITHUB_OUTPUT
+          else
+            ARGS=""
+            [ "$BUILD_BACKEND" = "true" ] && ARGS="$ARGS backend"
+            [ "$BUILD_FRONTEND" = "true" ] && ARGS="$ARGS frontend"
+            echo "pull_args=$ARGS" >> $GITHUB_OUTPUT
+          fi
 
   deploy:
     runs-on: ubuntu-latest
     needs: [changes, build-and-push]
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || github.event.inputs.force_build == 'true'
     steps:
       - name: SSH and deploy
         env:
@@ -93,7 +107,7 @@ jobs:
   deploy-infra:
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.backend == 'false' && needs.changes.outputs.frontend == 'false'
+    if: needs.changes.outputs.backend == 'false' && needs.changes.outputs.frontend == 'false' && github.event.inputs.force_build != 'true'
     steps:
       - name: SSH and apply compose changes
         env:
@@ -105,5 +119,5 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            "cd ~/homelab && git pull origin main && docker compose up -d"
+            "cd ~/homelab && git pull origin main && docker compose up -d --no-pull"
           rm /tmp/deploy_key
